@@ -124,10 +124,13 @@ def face_detector(file):
     return keyframes
 
 if __name__ == "__main__":
-    keyframes = face_detector("data/single.mp4")
-    # print(len(keyframes))
-    # print(keyframes[0].shape)
-    # print(keyframes[0])
+    keyframes = face_detector("data/t2.mp4")
+    # variable number of keyframes for different videos since all videos are not of same length
+    # Need to define some fixed number of keyframes for each video
+    # Random Sampling comes to rescue
+    
+
+    
     
     
 
