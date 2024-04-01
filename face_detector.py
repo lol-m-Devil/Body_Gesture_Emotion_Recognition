@@ -1,4 +1,3 @@
-
 import common
 import numpy as np
 import torch

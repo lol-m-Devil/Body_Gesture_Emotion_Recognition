@@ -1,8 +1,38 @@
 import torch
 import torch.nn as nn
 from torch import Tensor
+import torch.nn.functional as F
 
 from typing import Any, Callable, List, Optional, Type, Union
+
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+class FeatureFusion(nn.Module):
+    def __init__(self, in_channels):
+        super(FeatureFusion, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels, 1, kernel_size=1)  # Convert feature maps to 1 channel
+        self.softmax = nn.Softmax(dim=1)  # Softmax along the channel dimension
+
+    def forward(self, x1, x2):
+        # Compute attention weights
+        att_weights = self.compute_attention(x1, x2)
+
+        # Weighted fusion
+        fused_representation = att_weights[:, 0].unsqueeze(1) * x1 + att_weights[:, 1].unsqueeze(1) * x2
+
+        return fused_representation
+
+    def compute_attention(self, x1, x2):
+        # Convert feature maps to 1 channel
+        x1 = self.conv1(x1)
+        x2 = self.conv1(x2)
+
+        # Concatenate and apply softmax to get attention weights
+        concat_features = torch.cat((x1, x2), dim=1)
+        att_weights = self.softmax(concat_features)
+
+        return att_weights
 
 def conv3x3(in_planes: int, out_planes: int, stride: int = 1, groups: int = 1, dilation: int = 1) -> nn.Conv2d:
     """3x3 convolution with padding"""
@@ -17,13 +47,21 @@ def conv3x3(in_planes: int, out_planes: int, stride: int = 1, groups: int = 1, d
         dilation=dilation,
     )
 
+class Conv1x3x3(nn.Module):
+    def __init__(self, in_channels, out_channels, stride=1, padding=1, bias=True):
+        super(Conv1x3x3, self).__init__()
+        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size=(1, 3, 3),
+                              stride=(1, stride, stride), padding=(0, padding, padding), bias=bias)
 
+    def forward(self, x):
+        return self.conv(x)
+    
 def conv1x1(in_planes: int, out_planes: int, stride: int = 1) -> nn.Conv2d:
     """1x1 convolution"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
 
 
-class BasicBlock(nn.Module):
+class SISTCM(nn.Module):
     expansion: int = 1
 
     def __init__(
@@ -45,31 +83,41 @@ class BasicBlock(nn.Module):
         if dilation > 1:
             raise NotImplementedError("Dilation > 1 not supported in BasicBlock")
         
-        # Both self.conv1 and self.downsample layers downsample the input when stride != 1
         self.conv1 = conv3x3(inplanes, planes, stride)
-        self.bn1 = norm_layer(planes)
-        self.relu = nn.ReLU(inplace=True)
-        self.conv2 = conv3x3(planes, planes)
-        self.bn2 = norm_layer(planes)
-        self.downsample = downsample
+        self.conv2 = Conv1x3x3(planes, planes)
         self.stride = stride
-
+        self.fusion = FeatureFusion(in_channels=planes) #Not Confirmed what is input channel
+        self.downsample = downsample
+    
     def forward(self, x: Tensor) -> Tensor:
-        identity = x
-
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-
+        identity = x  # T x C x H x W 
+        
+        T, C, H, W = x.size()
+        
+        superimage_wt = x.permute(1, 2, 0, 3).contiguous().view(C, H, T*W)   # channels x H x (T*W)
+        superimage_ht = x.permute(1, 0, 2, 3).contiguous().view(C, T*H, W)  # channels x (T*H) x W
+        
+        out_wt = self.conv1(superimage_wt)  # channels x H x (T*W)
+        out_ht = self.conv1(superimage_ht)  # channels x (T*H) x W
+        
+        C, temp, W = out_ht.size()
+        H = W
+        T = temp // H 
+        
+        out_wt = out_wt.view(C, H, T, W).permute(2, 0, 1, 3)  # T x C x H x W
+        out_ht = out_ht.view(C, T, H, W).permute(1, 0, 2, 3)  # T x C x H x W
+        
+        out = self.fusion(out_wt, out_ht) # T x C x H x W        
+        out = out.permute(1,0,2,3)
         out = self.conv2(out)
-        out = self.bn2(out)
-
+        out = out.permute(1,0,2,3)
+        
+        
         if self.downsample is not None:
             identity = self.downsample(x)
-
+        
         out += identity
-        out = self.relu(out)
-
+        # print(out.shape)
         return out
 
 class SpatialAveragePooling(nn.Module):
@@ -84,9 +132,9 @@ class SpatialAveragePooling(nn.Module):
 class ResNet(nn.Module):
     def __init__(
         self,
-        block: Type[BasicBlock],
+        block: Type[SISTCM],
         layers: List[int],
-        num_classes: int = 512,
+        num_classes: int = 8,
         zero_init_residual: bool = False,
         groups: int = 1,
         width_per_group: int = 64,
@@ -122,7 +170,7 @@ class ResNet(nn.Module):
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2, dilate=replace_stride_with_dilation[2])
         
         #Make it 3d layer actually
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1)) #Make it 3d
+        self.avgpool = nn.AdaptiveAvgPool3d((1, 1, 1))
         
         self.fc = nn.Linear(512 * block.expansion, num_classes)
 
@@ -135,12 +183,12 @@ class ResNet(nn.Module):
 
         if zero_init_residual:
             for m in self.modules():
-                if isinstance(m, BasicBlock) and m.bn2.weight is not None:
+                if isinstance(m, SISTCM) and m.bn2.weight is not None:
                     nn.init.constant_(m.bn2.weight, 0)  # type: ignore[arg-type]
 
     def _make_layer(
         self,
-        block: Type[Union[BasicBlock]],
+        block: Type[Union[SISTCM]],
         planes: int,
         blocks: int,
         stride: int = 1,
@@ -181,12 +229,13 @@ class ResNet(nn.Module):
 
     def _forward_impl(self, x: Tensor) -> Tensor:
         # See note [TorchScript super()]
+        
         x = self.conv1(x)
-       
+        
         x = self.bn1(x)
         x = self.relu(x)
         x = self.maxpool(x)
-              
+        # print(x.shape)  -> 1 x 64 x 56 x 56     
 
         x = self.layer1(x)
         
@@ -195,15 +244,27 @@ class ResNet(nn.Module):
         x = self.layer3(x)
         
         x = self.layer4(x)
-    
-        return x
+
+        #ADD 3D ADAPTIVE POOLING
+        x = x.permute(1, 0, 2, 3)
+        x = self.avgpool(x)
+        x = x.view(x.size(0), -1)
+        
+        LST_features = x
+        
+        #ADD FULLY CONNECTED LAYER
+        x = x.permute(1, 0)
+        x = self.fc(x)
+        clip_emotion_level = x.permute(1, 0)
+                
+        return LST_features, clip_emotion_level
 
     def forward(self, x: Tensor) -> Tensor:
         return self._forward_impl(x)
 
 
 def _resnet(
-    block: Type[BasicBlock],
+    block: Type[SISTCM],
     layers: List[int],
     **kwargs: Any,
 ) -> ResNet:
@@ -211,3 +272,49 @@ def _resnet(
     model = ResNet(block, layers, **kwargs)
 
     return model
+
+
+class BiLSTM(nn.Module):
+    def __init__(self, input_size1, input_size2, hidden_size, num_layers, output_size):
+        super(BiLSTM, self).__init__()
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.lstm1 = nn.LSTM(input_size1, hidden_size, num_layers, batch_first=True, bidirectional=True)
+        self.lstm2 = nn.LSTM(input_size2, hidden_size, num_layers, batch_first=True, bidirectional=True)
+        self.fc = nn.Linear(hidden_size * 2 * 2, output_size)  # Multiply by 2 due to bidirectional LSTM for both vectors
+
+    def forward(self, x1, x2):
+        h0 = torch.zeros(self.num_layers * 2, x1.size(0), self.hidden_size).to(device)  # Initial hidden state
+        c0 = torch.zeros(self.num_layers * 2, x1.size(0), self.hidden_size).to(device)  # Initial cell state
+        out1, _ = self.lstm1(x1, (h0, c0))  # Forward pass through the first LSTM
+        out2, _ = self.lstm2(x2, (h0, c0))  # Forward pass through the second LSTM
+        out = torch.cat((out1[:, -1, :], out2[:, -1, :]), dim=1)  # Concatenate the outputs of both LSTMs
+        out = self.fc(out)  # Fully connected layer
+        return out
+
+
+
+
+# myResnet = _resnet(SISTCM, [2, 2, 2, 2])
+# tensor = torch.randn(144, 3, 224, 224) # T x channels x H x W
+# lst, emo = myResnet(tensor)
+
+# Example usage
+input_size1 = 512
+input_size2 = 8
+hidden_size = 64
+num_layers = 2
+output_size = 10  # Adjust this according to your task
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+# Create input tensors (dummy data for demonstration)
+x1 = torch.randn(1, 10, input_size1).to(device)  # Batch size 1, sequence length 10
+x2 = torch.randn(1, 10, input_size2).to(device)  # Batch size 1, sequence length 10
+
+# Create the BiLSTM model
+model = BiLSTM(input_size1, input_size2, hidden_size, num_layers, output_size).to(device)
+
+# Forward pass
+output = model(x1, x2)
+print(output.shape) 
+print(output)# Shape of the output tensor
