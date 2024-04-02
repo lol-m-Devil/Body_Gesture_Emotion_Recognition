@@ -109,7 +109,7 @@ def face_detector(file):
             left, top, right, bottom = intv(objs[0].box)
             cropped_frame = frame[top:bottom, left:right]
             cropped_frame = cv2.resize(cropped_frame, (224,224))
-            cv2.imshow("demo DBFace", cropped_frame)
+            # cv2.imshow("demo DBFace", cropped_frame)
             frameTensor = torch.tensor(cropped_frame, dtype=torch.float32).view(3, *(224, 224))
             keyframes.append(frameTensor)
         key = cv2.waitKey(1) & 0xFF
@@ -121,12 +121,6 @@ def face_detector(file):
     cap.release()
     cv2.destroyAllWindows()
     return keyframes
-
-if __name__ == "__main__":
-    keyframes = face_detector("data/t2.mp4")
-    # variable number of keyframes for different videos since all videos are not of same length
-    # Need to define some fixed number of keyframes for each video
-    # Random Sampling comes to rescue
     
 
     
