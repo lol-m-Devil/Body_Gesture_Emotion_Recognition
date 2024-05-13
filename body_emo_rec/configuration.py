@@ -4,7 +4,7 @@ import os
 def get_config():
     return {
         "batch_size": 4,
-        "num_epochs": 2,
+        "num_epochs": 5,
         "lr": 0.001,
         "step_size": 50,  
         "gamma": 0.5,

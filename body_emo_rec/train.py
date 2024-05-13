@@ -12,6 +12,7 @@ import accm
 from torch.optim.lr_scheduler import StepLR
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
 from torch.utils.tensorboard import SummaryWriter
 import tensorflow as tf
@@ -158,19 +159,18 @@ def train_model(config):
             # Log the loss
             writer.add_scalar('train loss', loss.item(), global_step)
             writer.flush()
-    
+            
+            global_step += 1
             loss.backward()
             print("Backprop Completed")
             optimizer.step()
             
             optimizer.zero_grad(set_to_none=True)
             print("Updation Step Completed")
-            global_step += 1
+            
 
             scheduler.step()
             
-        #run the validation and log the details using tensorboard!
-        validation(model, validation_dl, device, global_step, writer, config)
         
         #save your model
         model_filename = configuration.get_weights(config, f"{epoch:02d}")
@@ -182,7 +182,12 @@ def train_model(config):
             'global_step': global_step
         }, model_filename)
         
+        #run the validation and log the details using tensorboard!
+        validation(model, validation_dl, device, epoch, writer, config)
+        
 
+    writer.close()
+    
 if __name__ == '__main__':
     config = configuration.get_config()
     train_model(config)        
