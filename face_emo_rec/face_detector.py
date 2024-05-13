@@ -99,7 +99,7 @@ def face_detector(file):
     if HAS_CUDA:
         dbface.cuda()
 
-    dbface.load("model/dbface.pth")
+    dbface.load("face_emo_rec/model/dbface.pth")
     cap = cv2.VideoCapture(file)
     ok, frame = cap.read()
     keyframes = []

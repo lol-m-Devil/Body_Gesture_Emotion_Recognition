@@ -74,3 +74,7 @@ Worked on implementation of the paper titled: "Learning facial expression and bo
     - uses traditional CrossEntropyLoss.
     - saves model weights after each epoch.
     - Main file that trains the model.     
+
+NOTE: To visualize the loss and validation accuracy, we have created a writer which writes in the config["experiment_1"] file path.
+To do this, after the code has successfully run, run the following command in your Python terminal:
+tensorboard --logdir="absolute_path_to_experiment_1_folder"

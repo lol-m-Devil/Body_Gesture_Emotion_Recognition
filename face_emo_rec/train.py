@@ -168,9 +168,6 @@ def train_model(config):
             optimizer.zero_grad(set_to_none=True)
             print("Updation Step Completed")
             global_step += 1
-    
-        #run the validation and log the details using tensorboard!
-        validation(model, validation_dl, device, global_step, writer, config)
         
         #save your model
         model_filename = configuration.get_weights(config, f"{epoch:02d}")
@@ -182,6 +179,10 @@ def train_model(config):
             'global_step': global_step
         }, model_filename)
         
+        #run the validation and log the details using tensorboard!
+        validation(model, validation_dl, device, epoch, writer, config)
+        
+    writer.close()    
 
 if __name__ == '__main__':
     config = configuration.get_config()

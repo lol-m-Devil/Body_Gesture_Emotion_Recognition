@@ -6,7 +6,7 @@ def get_config():
         "batch_size": 4,
         "momentum": 0.9,
         "weight_decay": 0.0001,
-        "num_epochs": 3,
+        "num_epochs": 1,
         "lr": 0.005,
         "step_size": 50,  
         "gamma": 0.5,
